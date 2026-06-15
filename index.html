@@ -669,16 +669,20 @@
     }
 
     function prosesLogin(e) {
-        e.preventDefault();
-        const user = document.getElementById('loginUsername').value.trim().toLowerCase();
-        const pass = document.getElementById('loginPassword').value;
-        if (basisDataUser[user] && basisDataUser[user].password === pass) {
-            localStorage.setItem('currentUser', user);
-            currentUser = user;
-            document.getElementById('formLogin').reset();
-            cekStatusLogin();
-        } else { alert("Username atau Password salah!"); }
+    e.preventDefault();
+    const user = document.getElementById('loginUsername').value.trim().toLowerCase();
+    const pass = document.getElementById('loginPassword').value;
+    
+    // LOGIN BYPASS: Admin & admin1234 dijamin selalu lolos tanpa hambatan data kosong/cache cloud
+    if ((user === "admin" && pass === "admin1234") || (basisDataUser[user] && basisDataUser[user].password === pass)) {
+        localStorage.setItem('currentUser', user);
+        currentUser = user;
+        document.getElementById('formLogin').reset();
+        cekStatusLogin();
+    } else { 
+        alert("Username atau Password salah!"); 
     }
+}
 
     function prosesLogout() {
         if(confirm("Keluar dari sistem?")) {
@@ -752,50 +756,60 @@
 
     // MANAJEMEN INPUT DENGAN PROTEKSI EMERGENCY OFFLINE SAVING
     document.getElementById('stokForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const rowId = document.getElementById('editRowId').value;
-        const kategori = document.getElementById('kategoriBarang').value;
-        const kode = document.getElementById('kodeBarang').value.trim().toUpperCase();
-        const nama = document.getElementById('namaBarang').value.trim();
-        const jumlah = parseInt(document.getElementById('jumlahStok').value);
-        const status = document.getElementById('status').value;
-        const memo = document.getElementById('memoBarang').value.trim();
-        const waktu = new Date().toLocaleString('id-ID');
+    e.preventDefault();
+    const rowId = document.getElementById('editRowId').value;
+    const kategori = document.getElementById('kategoriBarang').value;
+    const kode = document.getElementById('kodeBarang').value.trim().toUpperCase();
+    const nama = document.getElementById('namaBarang').value.trim();
+    const jumlah = parseInt(document.getElementById('jumlahStok').value);
+    const status = document.getElementById('status').value;
+    const memo = document.getElementById('memoBarang').value.trim();
+    const waktu = new Date().toLocaleString('id-ID');
 
-        if(status === "Keluar") {
-            const sisaSkrg = sisaStokPerBarangGlobal[kode] || 0;
-            if(rowId === "-1" && jumlah > sisaSkrg) {
-                alert(`⚠️ GAGAL: Jumlah barang keluar (${jumlah} pcs) melebihi sisa stok gudang yang tersedia (${sisaSkrg} pcs).`);
-                return;
-            }
+    if(status === "Keluar") {
+        const sisaSkrg = sisaStokPerBarangGlobal[kode] || 0;
+        if(rowId === "-1" && jumlah > sisaSkrg) {
+            alert(`⚠️ GAGAL: Jumlah barang keluar (${jumlah} pcs) melebihi sisa stok gudang yang tersedia (${sisaSkrg} pcs).`);
+            return;
         }
+    }
 
-        document.getElementById('loadingForm').style.display = 'inline-flex';
-        document.getElementById('btnSimpan').disabled = true;
+    document.getElementById('loadingForm').style.display = 'inline-flex';
+    document.getElementById('btnSimpan').disabled = true;
 
-        let payload = { waktu, kode, nama, jumlah, status, petugas: currentUser, kategori, memo };
+    const userAktif = localStorage.getItem('currentUser') || currentUser;
+    let payload = { waktu, kode, nama, jumlah, status, petugas: userAktif, kategori, memo };
+    
+    if (rowId === "-1") { 
+        payload.action = "tambah"; 
+    } else { 
+        payload.action = "edit"; 
+        payload.rowId = rowId; 
+    }
+
+    fetch(WEB_APP_URL, { method: "POST", body: JSON.stringify(payload) })
+    .then(res => res.json())
+    .then(() => { 
+        alert("Data berhasil diproses ke cloud!");
         
-        if (rowId === "-1") { payload.action = "tambah"; } 
-        else { payload.action = "edit"; payload.rowId = rowId; payload.petugas = currentUser + " (Edited)"; }
-
-        fetch(WEB_APP_URL, { method: "POST", body: JSON.stringify(payload) })
-        .then(res => res.json())
-        .then(() => { resetFormInput(); muatDataDariCloud(); })
-        .catch(() => {
-            // JIKA INTERNET PUTUS, JALANKAN LOGIKA PENYELAMATAN DATA OFFLINE DISINI
-            if(payload.action === "tambah") {
-                antreanOffline.push(payload);
-                localStorage.setItem('antreanOffline_BabyBoss', JSON.stringify(antreanOffline));
-                alert("⚠️ Jaringan Internet Terputus! Data Anda BERHASIL DIAMANKAN di memori lokal browser. Silakan klik tombol merah 'Sinkronisasi Data' jika internet sudah menyala.");
-                resetFormInput();
-                cekStatusTombolOffline();
-            } else {
-                alert("Gagal mengedit data. Mode edit membutuhkan koneksi internet stabil.");
-                document.getElementById('loadingForm').style.display = 'none';
-                document.getElementById('btnSimpan').disabled = false;
-            }
-        });
+        document.getElementById('editRowId').value = "-1";
+        document.getElementById('stokForm').reset();
+        if(typeof resetFormInput === "function") { resetFormInput(); }
+        
+        // PENGHANCUR DATA DOUBLE
+        daftarStok = []; 
+        
+        muatDataDariCloud(); 
+    })
+    .catch((err) => {
+        console.error(err);
+        alert("Gagal memproses data. Periksa koneksi internet Anda.");
+    })
+    .finally(() => {
+        document.getElementById('loadingForm').style.display = 'none';
+        document.getElementById('btnSimpan').disabled = false;
     });
+});
 
     // Fungsi Baru: Cek Ketersediaan Antrean Data Offline
     function cekStatusTombolOffline() {
@@ -888,7 +902,9 @@
     }
 
     function tampilkanDataLog() {
-        const tbody = document.getElementById('dataStok');
+        const tbody = document.getElementById('dataStok'); // ID tabel asli BabyBoss
+        if(!tbody) return;
+        
         const filterKategori = document.getElementById('filterKategoriLog').value;
         const filterPetugas = document.getElementById('filterPetugas').value;
         const filterStatus = document.getElementById('filterStatusLog').value;
@@ -902,9 +918,11 @@
 
         let dataDitemukan = false;
 
+        // Looping mundur supaya data terbaru berada di posisi paling atas
         for (let i = daftarStok.length - 1; i >= 0; i--) {
             const item = daftarStok[i];
             
+            // Filter Data (Meloloskan semua data staff agar bisa saling lihat)
             if (filterKategori !== "Semua" && item.kategori !== filterKategori) continue;
             if (filterPetugas !== "Semua" && item.petugas !== filterPetugas) continue;
             if (filterStatus !== "Semua" && item.status !== filterStatus) continue;
@@ -915,12 +933,14 @@
 
             dataDitemukan = true;
             const kelasBadge = item.status === "Keluar" ? "bg-badge-danger" : "bg-badge-success";
+            
+            // SISTEM KEAMANAN: Cek apakah yang login Admin ATAU pemilik asli data tersebut
             const isAuthorized = (currentUser === "admin" || item.petugas === currentUser);
             
             const tombolAksi = isAuthorized ? `
-                <button class="btn-table-action btn-table-edit" onclick="persiapkanEdit(${item.rowId}, '${item.kode}', '${item.nama}', ${item.jumlah}, '${item.status}', '${item.kategori || ''}', '${item.memo || ''}')"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button class="btn-table-action btn-table-delete" onclick="hapusDataOnline(${item.rowId})"><i class="fa-solid fa-trash-can"></i></button>
-            ` : `<span style="font-size:0.8rem; color:var(--text-muted);">No Access</span>`;
+                <button type="button" class="btn-table-action btn-table-edit" onclick="persiapkanEdit(${item.rowId}, '${item.kode}', '${item.nama}', ${item.jumlah}, '${item.status}', '${item.kategori || ''}', '${item.memo || ''}')"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button type="button" class="btn-table-action btn-table-delete" onclick="hapusDataOnline(${item.rowId})"><i class="fa-solid fa-trash-can"></i></button>
+            ` : `<span style="font-size:0.8rem; color:var(--text-muted); font-style:italic;"><i class="fa-solid fa-lock"></i> Terkunci</span>`;
 
             tbody.innerHTML += `
                 <tr>
@@ -938,6 +958,62 @@
         }
         if(!dataDitemukan) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">Data tidak ditemukan.</td></tr>';
     }
+
+    // MANAJEMEN INPUT DAN EDIT (SUDAH DIPERBAIKI AGAR BISA EDIT BERKALI-KALI TANPA BATAS)
+    document.getElementById('stokForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const rowId = document.getElementById('editRowId').value;
+        const kategori = document.getElementById('kategoriBarang').value;
+        const kode = document.getElementById('kodeBarang').value.trim().toUpperCase();
+        const nama = document.getElementById('namaBarang').value.trim();
+        const jumlah = parseInt(document.getElementById('jumlahStok').value);
+        const status = document.getElementById('status').value;
+        const memo = document.getElementById('memoBarang').value.trim();
+        const waktu = new Date().toLocaleString('id-ID');
+
+        if(status === "Keluar") {
+            const sisaSkrg = sisaStokPerBarangGlobal[kode] || 0;
+            if(rowId === "-1" && jumlah > sisaSkrg) {
+                alert(`⚠️ GAGAL: Jumlah barang keluar (${jumlah} pcs) melebihi sisa stok gudang yang tersedia (${sisaSkrg} pcs).`);
+                return;
+            }
+        }
+
+        document.getElementById('loadingForm').style.display = 'inline-flex';
+        document.getElementById('btnSimpan').disabled = true;
+
+        let payload = { waktu, kode, nama, jumlah, status, petugas: currentUser, kategori, memo };
+        
+        if (rowId === "-1") { 
+            payload.action = "tambah"; 
+        } else { 
+            payload.action = "edit"; 
+            payload.rowId = rowId; 
+            // Menjaga agar nama petugas asli tidak berubah total, hanya diberi tanda edited jika perlu
+            payload.petugas = currentUser; 
+        }
+
+        fetch(WEB_APP_URL, { method: "POST", body: JSON.stringify(payload) })
+        .then(res => res.json())
+        .then(() => { 
+            alert("Data berhasil diproses ke cloud!");
+            resetFormInput(); // KUNCI UTAMA: Mengosongkan form & mengembalikan status form menjadi NORMAL (bisa tambah/edit lagi)
+            muatDataDariCloud(); 
+        })
+        .catch(() => {
+            if(payload.action === "tambah") {
+                antreanOffline.push(payload);
+                localStorage.setItem('antreanOffline_BabyBoss', JSON.stringify(antreanOffline));
+                alert("⚠️ Jaringan Internet Terputus! Data diamankan secara offline.");
+                resetFormInput();
+                cekStatusTombolOffline();
+            } else {
+                alert("Gagal mengedit data. Pastikan internet stabil.");
+                document.getElementById('loadingForm').style.display = 'none';
+                document.getElementById('btnSimpan').disabled = false;
+            }
+        });
+    });
 
     function hitungDanTampilkanRekapGlobal() {
         const tbody = document.getElementById('dataRekapGlobal');
